@@ -44,7 +44,10 @@ export default async function handler(req, res) {
       }),
     });
 
-    const data = await response.json();
+    const text = await response.text();
+console.log('Simpay raw response:', text);
+let data;
+try { data = JSON.parse(text); } catch(e) { return res.status(502).json({ erro: 'Simpay retornou HTML', resposta: text.substring(0, 500) }); }
     if (!response.ok) return res.status(502).json({ erro: 'Erro Simpay', detalhe: data });
 
     const sale    = data.sale || data;
