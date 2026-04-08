@@ -14,7 +14,7 @@ export default async function handler(req, res) {
     const SELLER_DOCUMENT  = process.env.SELLER_DOCUMENT;
     const valorReais       = parseFloat(valor).toFixed(2);
 
-    const response = await fetch('https://api.somossimpay.com.br/api/checkout/external/sales', {
+    const response = await fetch('https://api.dev.somossimpay.com.br/api/checkout/external/sales', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
