@@ -3064,12 +3064,9 @@
     //  URL do seu backend no Railway
     //  Substitua pela URL gerada após o deploy!
     // ══════════════════════════════════════════════
-    var BACKEND_URL = 'https://istore-backend.vercel.app';
+    var BACKEND_URL = 'https://istore-backend-git-main-luiseleite1010-codes-projects.vercel.app';
 
-    // ── Link de pagamento fixo da MedusaPay ──
-    var MEDUSA_LINK = 'https://link.v2.medusapay.com.br/gx4I16sVQW';
-
-    // ── Finalizar pagamento → gerar QR Code do link MedusaPay ──
+    // ── Finalizar pagamento → chamar backend Simpay ──
     function finalizarPagamento() {
       var temSeguro = document.getElementById('checkSeguro') && document.getElementById('checkSeguro').checked;
       var frete     = 39.99;
@@ -3080,37 +3077,23 @@
         return 'R$ ' + v.toFixed(2).replace('.', ',');
       }
 
-      // Mostrar modal PIX
+      // Mostrar modal PIX com loading
       document.getElementById('modalPagOverlay').classList.add('aberto');
 
-      // Atualizar valor exibido
       var valorEl = document.getElementById('pixValorExibido');
       var descEl  = document.getElementById('pixValorDesc');
       if (valorEl) valorEl.textContent = fmt(total);
       if (descEl)  descEl.textContent  = temSeguro ? 'Frete + Seguro do produto' : 'Frete expresso';
 
-      // Usar o link da MedusaPay como código copia e cola
-      var colaEl = document.getElementById('pixCopiaCola');
-      if (colaEl) colaEl.textContent = MEDUSA_LINK;
-
-      // Gerar QR Code a partir do link da MedusaPay
-      var qrUrl     = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(MEDUSA_LINK);
       var qrImg     = document.getElementById('pixQrImg');
       var qrLoading = document.getElementById('pixQrLoading');
+      var colaEl    = document.getElementById('pixCopiaCola');
 
-      if (qrImg && qrLoading) {
-        qrImg.style.display = 'none';
+      if (qrLoading) {
         qrLoading.style.display = 'block';
-        qrLoading.innerHTML = '<div class="verif-spinner" style="width:36px;height:36px;margin:0 auto 8px"></div><p style="font-size:12px;color:var(--texto-suave)">Gerando QR Code...</p>';
-        qrImg.onload = function() {
-          qrLoading.style.display = 'none';
-          qrImg.style.display = 'block';
-        };
-        qrImg.onerror = function() {
-          qrLoading.innerHTML = '<p style="font-size:12px;color:var(--texto-suave)">Use o link copia e cola abaixo</p>';
-        };
-        qrImg.src = qrUrl;
+        qrLoading.innerHTML = '<div class="verif-spinner" style="width:36px;height:36px;margin:0 auto 8px"></div><p style="font-size:12px;color:var(--texto-suave)">Gerando PIX...</p>';
       }
+      if (qrImg) qrImg.style.display = 'none';
 
       // Preencher resumo
       var resumoEl = document.getElementById('pagResumo');
@@ -3121,10 +3104,50 @@
           '<strong>⚡ Total: ' + fmt(total) + '</strong>';
       }
 
-      // Salvar txid para verificação
-      window._pixTxid = 'ISTORE' + Date.now();
+      // Pegar dados do cliente do formulário
+      var nome = (window._dadosCliente && window._dadosCliente.nome) || 'Cliente iStore';
+      var cpf  = (window._dadosCliente && window._dadosCliente.cpf)  || '00000000000';
 
-      iniciarTimerPix();
+      // Chamar backend Simpay
+      fetch(BACKEND_URL + '/api/criar-pix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          valor:     total,
+          nome:      nome,
+          cpf:       cpf,
+          descricao: 'Frete iStore'
+        })
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.erro) throw new Error(data.erro);
+
+        window._pixTxid = data.txid || ('ISTORE' + Date.now());
+
+        // Mostrar QR Code
+        var qrcode = data.qrcode || '';
+        var qrImg  = document.getElementById('pixQrImg');
+        var qrLoad = document.getElementById('pixQrLoading');
+
+        if (colaEl) colaEl.textContent = qrcode || 'Aguardando...';
+
+        if (qrImg) {
+          var qrUrl = data.qrcodeImage || ('https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(qrcode));
+          qrImg.onload = function() {
+            if (qrLoad) qrLoad.style.display = 'none';
+            qrImg.style.display = 'block';
+          };
+          qrImg.src = qrUrl;
+        }
+
+        iniciarTimerPix();
+        iniciarVerificacaoStatus();
+      })
+      .catch(function(err) {
+        if (qrLoading) qrLoading.innerHTML = '<p style="color:#ff5c1a;font-size:13px">Erro ao gerar PIX: ' + err.message + '</p>';
+        console.error('Erro PIX:', err);
+      });
     }
     // ── Fallback: gerar PIX localmente se o backend estiver indisponível ──
     function usarPixLocal(total, temSeguro, fmt) {
@@ -3173,7 +3196,7 @@
 
       _statusInterval = setInterval(function() {
         // 1. Verificar via webhook (mais rápido — notificação em tempo real)
-        fetch(BACKEND_URL + '/webhook/status/' + window._pixTxid)
+        fetch(BACKEND_URL + '/api/webhook-status/' + window._pixTxid)
           .then(function(r) { return r.json(); })
           .then(function(data) {
             if (data.pago) {
@@ -3181,7 +3204,7 @@
               return;
             }
             // 2. Fallback: consultar API da MedusaPay diretamente
-            return fetch(BACKEND_URL + '/status-pix/' + window._pixTxid)
+            return fetch(BACKEND_URL + '/api/status-pix/' + window._pixTxid)
               .then(function(r) { return r.json(); })
               .then(function(d) {
                 if (d.pago) confirmarPagamento();
@@ -3189,7 +3212,7 @@
           })
           .catch(function() {
             // Sem backend — verificar só pela API
-            fetch(BACKEND_URL + '/status-pix/' + window._pixTxid)
+            fetch(BACKEND_URL + '/api/status-pix/' + window._pixTxid)
               .then(function(r) { return r.json(); })
               .then(function(d) { if (d.pago) confirmarPagamento(); })
               .catch(function() {});
